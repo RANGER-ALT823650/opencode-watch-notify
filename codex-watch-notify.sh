@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+readonly LOG_FILE="${OPENCODE_NOTIFY_LOG:-/tmp/opencode-watch-notify.log}"
+readonly REMINDER_DELAY_SECONDS=0
+
+log() {
+  printf '%s source=%s event=%s %s\n' \
+    "$(date '+%Y-%m-%dT%H:%M:%S%z')" \
+    "${source:-unknown}" \
+    "${event:-unknown}" \
+    "$*" >>"$LOG_FILE"
+}
+
+source="${1:-codex}"
+event="${2:-unknown}"
+payload="${3:-}"
+requested_title="${4:-}"
+caller_tty="${5:-}"
+
+is_active_opencode_terminal() {
+  [[ "$source" == "opencode" && -n "$caller_tty" ]] || return 1
+
+  local front_asn front_info front_bundle selected_tty
+  front_asn=$(/usr/bin/lsappinfo front 2>/dev/null) || return 1
+  front_info=$(/usr/bin/lsappinfo info -only bundleID "$front_asn" 2>/dev/null) || return 1
+  front_bundle=$(sed -n 's/^"CFBundleIdentifier"="\(.*\)"$/\1/p' <<<"$front_info")
+
+  case "$front_bundle" in
+    com.apple.Terminal)
+      selected_tty=$(/usr/bin/osascript 2>/dev/null <<'APPLESCRIPT'
+tell application "Terminal"
+    if not running then return ""
+    if (count of windows) is 0 then return ""
+    return tty of selected tab of front window
+end tell
+APPLESCRIPT
+      ) || return 1
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+
+  [[ "$selected_tty" == "$caller_tty" ]]
+}
+
+case "$source" in
+  codex)
+    title="Codex: ${event}"
+    list="Codex"
+    original="/Users/mayifan/.codex/computer-use/Codex Computer Use.app/Contents/SharedSupport/SkyComputerUseClient.app/Contents/MacOS/SkyComputerUseClient"
+    if [[ -x "$original" ]]; then
+      if ! "$original" "$event" "$payload" >/dev/null 2>&1; then
+        log "native_notifier=failed"
+      fi
+    fi
+    ;;
+  opencode)
+    title="${requested_title:-Opencode: 任务已完成}"
+    list="opencode"
+    ;;
+  *)
+    log "result=failed reason=unsupported_source"
+    exit 2
+    ;;
+esac
+
+if is_active_opencode_terminal; then
+  log "result=skipped reason=active_terminal tty=${caller_tty}"
+  exit 0
+fi
+
+# 提醒事项 → iCloud 同步 → Apple Watch 震动
+if output=$(/usr/bin/osascript -e "
+on run argv
+    set t to item 1 of argv
+    set l to item 2 of argv
+    set p to item 3 of argv
+    set delaySeconds to (item 4 of argv) as integer
+    set notificationDate to (current date) + delaySeconds
+    tell application \"Reminders\"
+        tell list l
+            make new reminder with properties {name:t, body:p, remind me date:notificationDate, due date:notificationDate}
+        end tell
+    end tell
+end run
+" "$title" "$list" "$payload" "$REMINDER_DELAY_SECONDS" 2>&1); then
+  log "result=created list=${list} delay_seconds=${REMINDER_DELAY_SECONDS}"
+else
+  rc=$?
+  log "result=failed rc=${rc} error=${output//$'\n'/ }"
+  printf '%s\n' "$output" >&2
+  exit "$rc"
+fi
