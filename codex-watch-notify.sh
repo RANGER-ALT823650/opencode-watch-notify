@@ -3,6 +3,18 @@ set -uo pipefail
 
 readonly LOG_FILE="${OPENCODE_NOTIFY_LOG:-/tmp/opencode-watch-notify.log}"
 readonly REMINDER_DELAY_SECONDS=0
+readonly OPENCODE_DATA_DIR="${OPENCODE_DATA_DIR:-$HOME/.local/share/opencode}"
+readonly IOS_SESSION_TITLE="${OPENCODE_IOS_SESSION_TITLE:-iOS Chat}"
+
+is_ios_chat_session() {
+  [[ "$source" != "opencode" ]] && return 1
+  local session_id
+  session_id=$(sed -n 's/^Session: //p' <<<"$payload")
+  [[ -z "$session_id" ]] && return 1
+  local session_title
+  session_title=$(sqlite3 "$OPENCODE_DATA_DIR/opencode.db" "SELECT title FROM session WHERE id = '$session_id'" 2>/dev/null)
+  [[ "$session_title" == "$IOS_SESSION_TITLE" ]]
+}
 
 log() {
   printf '%s source=%s event=%s %s\n' \
@@ -68,6 +80,11 @@ esac
 
 if is_active_opencode_terminal; then
   log "result=skipped reason=active_terminal tty=${caller_tty}"
+  exit 0
+fi
+
+if is_ios_chat_session; then
+  log "result=skipped reason=ios_chat_session"
   exit 0
 fi
 

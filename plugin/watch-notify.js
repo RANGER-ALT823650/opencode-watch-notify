@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process"
 
 const NOTIFY_SCRIPT = process.env.OPENCODE_NOTIFY_SCRIPT || "/opt/opencode-watch-notify/codex-watch-notify.sh"
+const IOS_SESSION_TITLE = process.env.OPENCODE_IOS_SESSION_TITLE || "iOS Chat"
 const DUPLICATE_WINDOW_MS = 5000
 const lastNotificationBySession = new Map()
 
@@ -49,6 +50,9 @@ export const WatchNotificationPlugin = async ({ client, directory }) => {
           query: { directory },
         })
         const session = response.data ?? response
+
+        if (session?.title === IOS_SESSION_TITLE) return
+
         notificationTitle = formatNotificationTitle(session?.title)
       } catch {
         // A missing title should not suppress the completion notification.
