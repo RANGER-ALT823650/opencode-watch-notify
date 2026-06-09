@@ -30,6 +30,15 @@ payload="${3:-}"
 requested_title="${4:-}"
 caller_tty="${5:-}"
 
+is_screen_off() {
+  local brightness_val
+  brightness_val=$(ioreg -l -w 0 2>/dev/null | sed -n 's/.*"brightness"={"min"=[0-9]*,"max"=[0-9]*,"value"=\([0-9]*\)}.*/\1/p' | head -1)
+  if [[ -n "$brightness_val" && "$brightness_val" -eq 0 ]]; then
+    return 0
+  fi
+  return 1
+}
+
 is_active_opencode_terminal() {
   [[ "$source" == "opencode" && -n "$caller_tty" ]] || return 1
 
@@ -78,9 +87,12 @@ case "$source" in
     ;;
 esac
 
-if is_active_opencode_terminal; then
-  log "result=skipped reason=active_terminal tty=${caller_tty}"
-  exit 0
+if [[ "$event" == "task-completed" ]] && is_active_opencode_terminal; then
+  if ! is_screen_off; then
+    log "result=skipped reason=active_terminal tty=${caller_tty}"
+    exit 0
+  fi
+  log "result=bypass_terminal_check reason=screen_off tty=${caller_tty}"
 fi
 
 if is_ios_chat_session; then
