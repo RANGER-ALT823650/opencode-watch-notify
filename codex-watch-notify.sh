@@ -95,7 +95,7 @@ if [[ "$event" == "task-completed" ]] && is_active_opencode_terminal; then
   log "result=bypass_terminal_check reason=screen_off tty=${caller_tty}"
 fi
 
-if is_ios_chat_session; then
+if [[ "$event" == "task-completed" ]] && is_ios_chat_session; then
   log "result=skipped reason=ios_chat_session"
   exit 0
 fi

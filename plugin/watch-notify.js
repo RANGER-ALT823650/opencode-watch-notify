@@ -4,6 +4,7 @@ const NOTIFY_SCRIPT = process.env.OPENCODE_NOTIFY_SCRIPT || "/opt/opencode-watch
 const IOS_SESSION_TITLE = process.env.OPENCODE_IOS_SESSION_TITLE || "iOS Chat"
 const DUPLICATE_WINDOW_MS = 5000
 const lastNotificationBySession = new Map()
+const notifiedPermissions = new Set()
 
 const processTTY = (() => {
   try {
@@ -26,9 +27,99 @@ const formatNotificationTitle = (title) => {
   return `Opencode: ${normalized.slice(0, 100)}`
 }
 
+const runNotifier = async ({
+  client,
+  eventName,
+  details,
+  notificationTitle,
+  sessionID,
+  callerTTY = processTTY,
+}) => {
+  try {
+    const process = Bun.spawn(
+      [
+        NOTIFY_SCRIPT,
+        "opencode",
+        eventName,
+        details,
+        notificationTitle,
+        callerTTY,
+      ],
+      {
+        stdout: "ignore",
+        stderr: "pipe",
+      },
+    )
+    const exitCode = await process.exited
+    if (exitCode === 0) return
+
+    const stderr = await new Response(process.stderr).text()
+    await client.app.log({
+      body: {
+        service: "watch-notify",
+        level: "error",
+        message: "Failed to create watch reminder",
+        extra: {
+          eventName,
+          sessionID,
+          exitCode,
+          stderr,
+        },
+      },
+    })
+  } catch (error) {
+    await client.app.log({
+      body: {
+        service: "watch-notify",
+        level: "error",
+        message: "Failed to run watch notifier",
+        extra: {
+          eventName,
+          sessionID,
+          error: String(error),
+        },
+      },
+    })
+  }
+}
+
 export const WatchNotificationPlugin = async ({ client, directory }) => {
   return {
     event: async ({ event }) => {
+      // OpenCode v2 emits permission.asked; keep the old event for compatibility.
+      if (
+        event.type === "permission.asked" ||
+        event.type === "permission.updated"
+      ) {
+        const permission = event.properties
+        const permissionID = permission.id ?? permission.requestID
+        if (permissionID && notifiedPermissions.has(permissionID)) return
+        if (permissionID) notifiedPermissions.add(permissionID)
+
+        const rawPatterns = permission.patterns ?? permission.pattern
+        const pattern = Array.isArray(rawPatterns)
+          ? rawPatterns.join(", ")
+          : (rawPatterns ?? "")
+        const permissionType = permission.permission ?? permission.type ?? "unknown"
+        const details = [
+          directory,
+          `Session: ${permission.sessionID}`,
+          `Permission: ${permissionType}`,
+          pattern ? `Pattern: ${pattern}` : "",
+          permission.title ? `Title: ${permission.title}` : "",
+        ].filter(Boolean).join("\n")
+
+        await runNotifier({
+          client,
+          eventName: "permission-request",
+          details,
+          notificationTitle: "Opencode: 需要权限批准",
+          sessionID: permission.sessionID,
+          callerTTY: "",
+        })
+        return
+      }
+
       const isIdleEvent =
         event.type === "session.idle" ||
         (event.type === "session.status" && event.properties.status.type === "idle")
@@ -58,50 +149,13 @@ export const WatchNotificationPlugin = async ({ client, directory }) => {
         // A missing title should not suppress the completion notification.
       }
 
-      try {
-        const process = Bun.spawn(
-          [
-            NOTIFY_SCRIPT,
-            "opencode",
-            "task-completed",
-            details,
-            notificationTitle,
-            processTTY,
-          ],
-          {
-            stdout: "ignore",
-            stderr: "pipe",
-          },
-        )
-        const exitCode = await process.exited
-        if (exitCode === 0) return
-
-        const stderr = await new Response(process.stderr).text()
-        await client.app.log({
-          body: {
-            service: "watch-notify",
-            level: "error",
-            message: "Failed to create completion reminder",
-            extra: {
-              sessionID,
-              exitCode,
-              stderr,
-            },
-          },
-        })
-      } catch (error) {
-        await client.app.log({
-          body: {
-            service: "watch-notify",
-            level: "error",
-            message: "Failed to run completion notifier",
-            extra: {
-              sessionID,
-              error: String(error),
-            },
-          },
-        })
-      }
+      await runNotifier({
+        client,
+        eventName: "task-completed",
+        details,
+        notificationTitle,
+        sessionID,
+      })
     },
   }
 }
