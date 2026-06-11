@@ -1,18 +1,24 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
-readonly LOG_FILE="${OPENCODE_NOTIFY_LOG:-/tmp/opencode-watch-notify.log}"
+readonly LOG_FILE="${MIMOCODE_NOTIFY_LOG:-${OPENCODE_NOTIFY_LOG:-/tmp/opencode-watch-notify.log}}"
 readonly REMINDER_DELAY_SECONDS=0
 readonly OPENCODE_DATA_DIR="${OPENCODE_DATA_DIR:-$HOME/.local/share/opencode}"
-readonly IOS_SESSION_TITLE="${OPENCODE_IOS_SESSION_TITLE:-iOS Chat}"
+readonly MIMOCODE_DATA_DIR="${MIMOCODE_DATA_DIR:-$HOME/.local/share/mimocode}"
+readonly IOS_SESSION_TITLE="${MIMOCODE_IOS_SESSION_TITLE:-${OPENCODE_IOS_SESSION_TITLE:-iOS Chat}}"
 
 is_ios_chat_session() {
-  [[ "$source" != "opencode" ]] && return 1
+  local data_dir
+  case "$source" in
+    opencode) data_dir="$OPENCODE_DATA_DIR" ;;
+    mimocode) data_dir="$MIMOCODE_DATA_DIR" ;;
+    *) return 1 ;;
+  esac
   local session_id
   session_id=$(sed -n 's/^Session: //p' <<<"$payload")
   [[ -z "$session_id" ]] && return 1
   local session_title
-  session_title=$(sqlite3 "$OPENCODE_DATA_DIR/opencode.db" "SELECT title FROM session WHERE id = '$session_id'" 2>/dev/null)
+  session_title=$(sqlite3 "$data_dir/opencode.db" "SELECT title FROM session WHERE id = '$session_id'" 2>/dev/null)
   [[ "$session_title" == "$IOS_SESSION_TITLE" ]]
 }
 
@@ -40,7 +46,7 @@ is_screen_off() {
 }
 
 is_active_opencode_terminal() {
-  [[ "$source" == "opencode" && -n "$caller_tty" ]] || return 1
+  [[ ("$source" == "opencode" || "$source" == "mimocode") && -n "$caller_tty" ]] || return 1
 
   local front_asn front_info front_bundle selected_tty
   front_asn=$(/usr/bin/lsappinfo front 2>/dev/null) || return 1
@@ -80,6 +86,10 @@ case "$source" in
   opencode)
     title="${requested_title:-Opencode: 任务已完成}"
     list="opencode"
+    ;;
+  mimocode)
+    title="${requested_title:-MiMoCode: 任务已完成}"
+    list="mimocode"
     ;;
   *)
     log "result=failed reason=unsupported_source"

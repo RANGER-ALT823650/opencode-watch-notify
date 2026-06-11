@@ -1,7 +1,9 @@
 import { execFileSync } from "node:child_process"
 
-const NOTIFY_SCRIPT = process.env.OPENCODE_NOTIFY_SCRIPT || "/opt/opencode-watch-notify/codex-watch-notify.sh"
-const IOS_SESSION_TITLE = process.env.OPENCODE_IOS_SESSION_TITLE || "iOS Chat"
+const NOTIFY_SOURCE = process.env.NOTIFY_SOURCE || "opencode"
+const SOURCE_LABEL = { opencode: "Opencode", mimocode: "MiMoCode" }[NOTIFY_SOURCE] || NOTIFY_SOURCE
+const NOTIFY_SCRIPT = process.env.MIMOCODE_NOTIFY_SCRIPT || process.env.OPENCODE_NOTIFY_SCRIPT || "/opt/opencode-watch-notify/codex-watch-notify.sh"
+const IOS_SESSION_TITLE = process.env.MIMOCODE_IOS_SESSION_TITLE || process.env.OPENCODE_IOS_SESSION_TITLE || "iOS Chat"
 const DUPLICATE_WINDOW_MS = 5000
 const lastNotificationBySession = new Map()
 const notifiedPermissions = new Set()
@@ -22,9 +24,9 @@ const processTTY = (() => {
 const formatNotificationTitle = (title) => {
   const normalized = title?.replace(/\s+/g, " ").trim()
   if (!normalized || normalized.startsWith("New session -")) {
-    return "Opencode: 任务已完成"
+    return `${SOURCE_LABEL}: 任务已完成`
   }
-  return `Opencode: ${normalized.slice(0, 100)}`
+  return `${SOURCE_LABEL}: ${normalized.slice(0, 100)}`
 }
 
 const runNotifier = async ({
@@ -39,7 +41,7 @@ const runNotifier = async ({
     const process = Bun.spawn(
       [
         NOTIFY_SCRIPT,
-        "opencode",
+        NOTIFY_SOURCE,
         eventName,
         details,
         notificationTitle,
@@ -113,7 +115,7 @@ export const WatchNotificationPlugin = async ({ client, directory }) => {
           client,
           eventName: "permission-request",
           details,
-          notificationTitle: "Opencode: 需要权限批准",
+          notificationTitle: `${SOURCE_LABEL}: 需要权限批准`,
           sessionID: permission.sessionID,
           callerTTY: "",
         })
@@ -133,7 +135,7 @@ export const WatchNotificationPlugin = async ({ client, directory }) => {
       lastNotificationBySession.set(sessionID, now)
 
       const details = `${directory}\nSession: ${sessionID}`
-      let notificationTitle = "Opencode: 任务已完成"
+      let notificationTitle = `${SOURCE_LABEL}: 任务已完成`
 
       try {
         const response = await client.session.get({
