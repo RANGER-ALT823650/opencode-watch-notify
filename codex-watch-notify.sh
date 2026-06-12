@@ -64,6 +64,16 @@ end tell
 APPLESCRIPT
       ) || return 1
       ;;
+    com.googlecode.iterm2)
+      selected_tty=$(/usr/bin/osascript 2>/dev/null <<'APPLESCRIPT'
+tell application "iTerm2"
+    if not running then return ""
+    if (count of windows) is 0 then return ""
+    return tty of current session of front window
+end tell
+APPLESCRIPT
+      ) || return 1
+      ;;
     *)
       return 1
       ;;
